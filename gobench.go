@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -30,16 +31,23 @@ var (
 	writeTimeout     int
 	readTimeout      int
 	authHeader       string
+	customHeader     string
 )
 
+type Header struct {
+	name  string
+	value string
+}
+
 type Configuration struct {
-	urls       []string
-	method     string
-	postData   []byte
-	requests   int64
-	period     int64
-	keepAlive  bool
-	authHeader string
+	urls         []string
+	method       string
+	postData     []byte
+	requests     int64
+	period       int64
+	keepAlive    bool
+	authHeader   string
+	customHeader []Header
 
 	myClient fasthttp.Client
 }
@@ -89,6 +97,7 @@ func init() {
 	flag.IntVar(&writeTimeout, "tw", 5000, "Write timeout (in milliseconds)")
 	flag.IntVar(&readTimeout, "tr", 5000, "Read timeout (in milliseconds)")
 	flag.StringVar(&authHeader, "auth", "", "Authorization header")
+	flag.StringVar(&customHeader, "header", "", "Custom http header (use ; as delimiter)")
 }
 
 func printResults(results map[int]*Result, startTime time.Time) {
@@ -170,12 +179,13 @@ func NewConfiguration() *Configuration {
 	}
 
 	configuration := &Configuration{
-		urls:       make([]string, 0),
-		method:     "GET",
-		postData:   nil,
-		keepAlive:  keepAlive,
-		requests:   int64((1 << 63) - 1),
-		authHeader: authHeader}
+		urls:         make([]string, 0),
+		method:       "GET",
+		postData:     nil,
+		keepAlive:    keepAlive,
+		requests:     int64((1 << 63) - 1),
+		authHeader:   authHeader,
+		customHeader: make([]Header, 0)}
 
 	if period != -1 {
 		configuration.period = period
@@ -214,6 +224,14 @@ func NewConfiguration() *Configuration {
 
 	if url != "" {
 		configuration.urls = append(configuration.urls, url)
+	}
+
+	if customHeader != "" {
+		headerSlice := strings.Split(customHeader, ";")
+		for _, val := range headerSlice {
+			elementSlice := strings.Split(val, ":")
+			configuration.customHeader = append(configuration.customHeader, Header{name: elementSlice[0], value: elementSlice[1]})
+		}
 	}
 
 	if postDataFilePath != "" {
@@ -263,6 +281,12 @@ func client(configuration *Configuration, result *Result, done *sync.WaitGroup) 
 				req.Header.Set("Connection", "keep-alive")
 			} else {
 				req.Header.Set("Connection", "close")
+			}
+
+			if len(configuration.customHeader) > 0 {
+				for _, header := range configuration.customHeader {
+					req.Header.Set(header.name, header.value)
+				}
 			}
 
 			if len(configuration.authHeader) > 0 {
